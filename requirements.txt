@@ -2,3 +2,4 @@ newspaper3k
 requests
 pandas
 BeautifulSoup4
+spacy
