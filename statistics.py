@@ -1,7 +1,6 @@
 from utils import read_functions
 import spacy
 from tqdm import tqdm
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 def tokenize(text_input: str, nlp_fr):
