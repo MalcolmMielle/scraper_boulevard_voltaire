@@ -3,18 +3,18 @@ import spacy
 import io
 from tqdm import tqdm
 from sklearn.feature_extraction.text import TfidfVectorizer
-from tensorflow.keras.preprocessing.text import one_hot
+# from tensorflow.keras.preprocessing.text import one_hot
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import tensorflow.keras.utils
 
 import tensorflow_datasets as tfds
 import tensorflow as tf
 
-import time
+# import time
 import numpy as np
 import matplotlib.pyplot as plt
 
-import pprint
+# import pprint
 
 import re
 from sklearn.model_selection import train_test_split
@@ -22,8 +22,10 @@ from sklearn.model_selection import train_test_split
 from tensorflow import keras
 from tensorflow.keras import layers
 
-import tensorflow_datasets as tfds
+# import tensorflow_datasets as tfds
 tfds.disable_progress_bar()
+
+from nlp import generator
 
 
 # %% codecell
@@ -70,12 +72,16 @@ def preprocess_token(token) -> str:
 
 
 def token_filter(corpus: list) -> list:
-    list_out = set()
+    list_out = dict()
     for text in corpus:
         for word in text:
             if not word.is_stop and word.is_alpha:
-                # print("w:" + word.lemma_)
-                list_out.add(preprocess_token(word))
+                word_text = preprocess_token(word)
+                if word_text in list_out:
+                    list_out[word_text] = list_out[word_text] + 1
+                else:
+                    # print("w:" + word.lemma_)
+                    list_out[word_text] = 1
     return list_out
 
 
@@ -92,14 +98,15 @@ def dummy_f(doc):
     return doc
 
 
-def one_hot_encode(train_texts):
-    own_embedding_vocab_size = 500
-    encoded_docs_oe = [one_hot(d, own_embedding_vocab_size) for d in train_texts]
-    # print(encoded_docs_oe)
-    maxlen = 500
-    padded_docs_oe = pad_sequences(encoded_docs_oe, maxlen=maxlen, padding='post')
-    print(padded_docs_oe)
-    return padded_docs_oe
+# # TODO maybe some possible optimization here
+# def one_hot_encode(train_texts):
+#     own_embedding_vocab_size = 500
+#     encoded_docs_oe = [one_hot(d, own_embedding_vocab_size) for d in train_texts]
+#     # print(encoded_docs_oe)
+#     maxlen = 500
+#     padded_docs_oe = pad_sequences(encoded_docs_oe, maxlen=maxlen, padding='post')
+#     print(padded_docs_oe)
+#     return padded_docs_oe
 
 
 def ngram_vectorize(train_texts):
@@ -134,7 +141,7 @@ def ngram_vectorize(train_texts):
 # %% codecell
 # Load Data
 # use your path
-path = r'data_test'
+path = r'data'
 frame = read_functions.read_csv(path)
 # print(frame)
 
@@ -159,23 +166,28 @@ len(doc.vocab)
 # Creating vocab from all words
 train_examples = frame['tokenized'].tolist()
 unique_tokens = token_filter(train_examples)
-for el in unique_tokens:
-    print("TEXT: ", el)
+unique_tokens_sorted = {k: v for k, v in sorted(unique_tokens.items(), key=lambda item: item[1], reverse=True)}
+# for el in unique_tokens:
+    # print("TEXT: ", el)
+vocab_size = 2000
+vocab_tokens = list(unique_tokens_sorted)[:vocab_size]
+print(len(vocab_tokens) , " and ", vocab_tokens)
+# print(len(vocab_tokens) , " and ", unique_tokens_sorted)
 
-vocab = {k: v for v, k in enumerate(unique_tokens)}
-vocab_decode = {v: k for k, v in vocab.items()}
-pprint.pprint(vocab)
+# vocab = {k: v for v, k in enumerate(vocab_tokens)}
+# vocab_decode = {v: k for k, v in vocab.items()}
+# pprint.pprint(vocab)
+#
+# print(vocab_decode[224])
+# print(len(vocab))
 
-print(vocab_decode[224])
-print(len(vocab))
+encoder = tfds.features.text.TokenTextEncoder(vocab_tokens)
 
-encoder = tfds.features.text.TokenTextEncoder(unique_tokens)
-
-test = "front être test"
-encoded_example = encoder.encode(test)
+# test = "front être test"
+# encoded_example = encoder.encode(test)
 # print(encoded_example)
 
-decoded_example = encoder.decode(encoded_example)
+# decoded_example = encoder.decode(encoded_example)
 # print(decoded_example)
 
 
@@ -196,19 +208,19 @@ def decode(text_encoded: list, encoder: tfds.features.text.TokenTextEncoder) -> 
     return decoded_text
 
 
-print(decode([0, 0, 0, 0, 0, 0], encoder))
+print(decode([568, 569, 1865, 0, 0, 0], encoder))
 
 frame['decoded'] = frame['encoded'].progress_apply(decode, args=(encoder,))
 
-print(frame['decoded'])
+# print(frame['decoded'])
 
 maxlen = 500
 dataset_list = pad_sequences(frame['encoded'].tolist(), maxlen=maxlen, padding='post')
 
 dataset = tf.data.Dataset.from_tensor_slices(dataset_list)
-print(dataset)
-for elem in dataset:
-    print(elem.numpy())
+# print(dataset)
+# for elem in dataset:
+    # print(elem.numpy())
 
 
 # %% codecel
@@ -271,9 +283,12 @@ def to_one_hot_all_features(features: list, vocab_size: int):
     x_train = []
     # output word
     y_train = []
-    for data_word in features:
-        x_train.append(to_one_hot(features[0], vocab_size))
-        y_train.append(to_one_hot(features[1], vocab_size))
+    print("TODO: ", len(features))
+    for i, data_word in enumerate(features):
+        if i % 1000 == 0:
+            print("step:", i)
+        x_train.append(to_one_hot(data_word[0], vocab_size))
+        y_train.append(to_one_hot(data_word[1], vocab_size))
     # convert them to numpy arrays
     x_train = np.asarray(x_train, dtype='float32')
     y_train = np.asarray(y_train, dtype='float32')
@@ -294,6 +309,8 @@ print("Done converting to one-hot")
 
 embedding_dim = 16
 
+print(encoder.vocab_size)
+
 model = keras.Sequential([
   layers.Embedding(input_dim=encoder.vocab_size, output_dim=embedding_dim, input_length=encoder.vocab_size),
   # layers.GlobalAveragePooling1D(),
@@ -308,14 +325,14 @@ model.summary()
 learning_rate = 1e-4
 
 METRICS = [
-          tf.keras.metrics.TruePositives(name='tp'),
-          tf.keras.metrics.FalsePositives(name='fp'),
-          tf.keras.metrics.TrueNegatives(name='tn'),
-          tf.keras.metrics.FalseNegatives(name='fn'),
+          # tf.keras.metrics.TruePositives(name='tp'),
+          # tf.keras.metrics.FalsePositives(name='fp'),
+          # tf.keras.metrics.TrueNegatives(name='tn'),
+          # tf.keras.metrics.FalseNegatives(name='fn'),
           tf.keras.metrics.BinaryAccuracy(name='accuracy'),
-          tf.keras.metrics.Precision(name='precision'),
-          tf.keras.metrics.Recall(name='recall'),
-          tf.keras.metrics.AUC(name='auc'),
+          # tf.keras.metrics.Precision(name='precision'),
+          # tf.keras.metrics.Recall(name='recall'),
+          # tf.keras.metrics.AUC(name='auc'),
           ]
 
 optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
@@ -324,6 +341,8 @@ model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=METR
 # model.compile(optimizer='adam',
 #               loss=tf.keras.losses.BinaryCrossentropy(),
 #               metrics=['accuracy'])
+
+# %%codcell
 
 print(data_train.shape)
 print(labels_train.shape)
@@ -357,3 +376,34 @@ for num, word in enumerate(encoder.tokens):
     out_v.write('\t'.join([str(x) for x in vec]) + "\n")
 out_v.close()
 out_m.close()
+
+
+# %% codecell
+
+history_dict = history.history
+
+acc = history_dict['accuracy']
+val_acc = history_dict['val_accuracy']
+loss = history_dict['loss']
+val_loss = history_dict['val_loss']
+
+epochs = range(1, len(acc) + 1)
+
+plt.figure(figsize=(12,9))
+plt.plot(epochs, loss, 'bo', label='Training loss')
+plt.plot(epochs, val_loss, 'b', label='Validation loss')
+plt.title('Training and validation loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12,9))
+plt.plot(epochs, acc, 'bo', label='Training acc')
+plt.plot(epochs, val_acc, 'b', label='Validation acc')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right')
+plt.ylim((0.5,1))
+plt.show()
