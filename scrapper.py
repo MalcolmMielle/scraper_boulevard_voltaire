@@ -42,8 +42,8 @@ def scrap_archive_page(page: int) -> int:
 
 
 def scrap_archives():
-    nb_of_pages = 500
-    start_page = 51
+    nb_of_pages = 50
+    start_page = 0
     print("Scrap")
     total_articles = 0
     for page in range(start_page, nb_of_pages + 1):

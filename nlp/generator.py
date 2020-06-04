@@ -4,9 +4,9 @@ import tensorflow as tf
 
 
 class one_hot_batch_generator(tensorflow.keras.utils.Sequence):
-
     def __init__(self, features, labels, batch_size, vocab_size):
-        self.features, self.labels = features, labels
+        self.features, self.labels = np.array(features), np.array(labels)
+        print(type(self.features))
         self.batch_size = batch_size
         self.vocab_size = vocab_size
 

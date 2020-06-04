@@ -1,6 +1,7 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
 # import pprint
 import re
+import tensorflow_datasets as tfds
 
 
 def remove_accents(string):
@@ -103,9 +104,21 @@ def ngram_vectorize(train_texts):
         'tokenizer': process,
         'preprocessor': dummy_f,
         'token_pattern': None
-    }
+        }
     vectorizer = TfidfVectorizer(**kwargs)
 
     # Learn vocabulary from training texts and vectorize training texts.
     x_train = vectorizer.fit_transform(train_texts)
     return x_train
+
+
+def build_encoder(train_examples: list, vocab_size: int = 2000) -> tfds.features.text.TokenTextEncoder:
+    unique_tokens = token_filter(train_examples)
+    unique_tokens_sorted = {k: v for k, v in sorted(unique_tokens.items(), key=lambda item: item[1], reverse=True)}
+    # for el in unique_tokens:
+    #    print("TEXT: ", el)
+    print("There are ", len(unique_tokens_sorted), " unique words but we keep the ", vocab_size, " most common")
+    vocab_tokens = list(unique_tokens_sorted)[:vocab_size]
+    print(len(vocab_tokens))
+    # print(len(vocab_tokens), " and ", vocab_tokens)
+    return tfds.features.text.TokenTextEncoder(vocab_tokens)

@@ -1,9 +1,10 @@
-from utils import read_functions
-import spacy
+# from utils import read_functions
+# import spacy
 import io
-from tqdm import tqdm
+# from tqdm import tqdm
+import pandas as pd
 # from tensorflow.keras.preprocessing.text import one_hot
-from tensorflow.keras.preprocessing.sequence import pad_sequences
+# from tensorflow.keras.preprocessing.sequence import pad_sequences
 import tensorflow.keras.utils
 
 import tensorflow_datasets as tfds
@@ -22,78 +23,29 @@ from tensorflow.keras import layers
 
 from nlp import generator
 from nlp import utils
-
+from nlp import preprocess
+from nlp import cbow
 # import tensorflow_datasets as tfds
 tfds.disable_progress_bar()
-
 
 
 # %% codecell
 # Load Data
 # use your path
-path = r'data_test'
-frame = read_functions.read_csv(path)
-# print(frame)
-
-nlp = spacy.load("fr_core_news_sm")
-tqdm.pandas()
-print("Tokenize")
-frame['tokenized'] = frame['text'].progress_apply(utils.tokenize, args=(nlp,))
-print("Tokenized\nSum words")
-frame['sum'] = frame['tokenized'].progress_apply(utils.sum_words)
-print("Tokenized\ntoekn to str")
-frame['token_str'] = frame['tokenized'].progress_apply(utils.token_to_str)
-
-# print(frame['token_str'][0])
+path = r'data'
+vocab_size = 2000
+frame = preprocess.load_and_tokenize(path)
 
 # %% codecell
 # NLP
-
 #
-doc = frame['tokenized'].iloc[0]
-len(doc.vocab)
-
 # Creating vocab from all words
 train_examples = frame['tokenized'].tolist()
-unique_tokens = utils.token_filter(train_examples)
-unique_tokens_sorted = {k: v for k, v in sorted(unique_tokens.items(), key=lambda item: item[1], reverse=True)}
-# for el in unique_tokens:
-#    print("TEXT: ", el)
-vocab_size = 2000
-print("There are ", len(unique_tokens_sorted), " unique words but we keep the ", vocab_size, " most common")
-vocab_tokens = list(unique_tokens_sorted)[:vocab_size]
-print(len(vocab_tokens))
-# print(len(vocab_tokens), " and ", vocab_tokens)
-encoder = tfds.features.text.TokenTextEncoder(vocab_tokens)
-
-print(unique_tokens_sorted.keys())
+encoder = utils.build_encoder(train_examples, vocab_size)
+# print(unique_tokens_sorted.keys())
 
 
 # %% codecell
-# Build dataset
-def encode(text: str, encoder: tfds.features.text.TokenTextEncoder, pad: bool = True) -> list:
-    encoded_text = encoder.encode(text)
-    return encoded_text
-
-
-frame['encoded'] = frame['token_str'].progress_apply(encode, args=(encoder,))
-
-# print(frame['encoded'])
-
-
-def decode(text_encoded: list, encoder: tfds.features.text.TokenTextEncoder) -> str:
-    decoded_text = encoder.decode(text_encoded)
-    return decoded_text
-
-
-# print(decode([568, 569, 1865, 0, 0, 0], encoder))
-frame['decoded'] = frame['encoded'].progress_apply(decode, args=(encoder,))
-
-# print(frame['decoded'])
-
-
-# %% codecell
-
 def stats_encoding(text):
     unk = 0
     known = 0
@@ -106,23 +58,16 @@ def stats_encoding(text):
     return unk, known
 
 
-stats = frame['encoded'].progress_apply(stats_encoding).tolist()
+def encoding_stat_dataset(dataset: pd.DataFrame, column_name: str = 'token_str') -> None:
+    stats = dataset['encoded'].progress_apply(stats_encoding).tolist()
+    known = sum([k[1] for k in stats])
+    unk = sum([k[0] for k in stats])
+    print("The dataset has ", known, " known tokens and ", unk, " unknown tokens")
 
-known = sum([k[1] for k in stats])
-unk = sum([k[0] for k in stats])
-print("The dataset has ", known, " known tokens and ", unk, " unknown tokens")
 
+frame['encoded'] = frame['token_str'].progress_apply(preprocess.encode, args=(encoder,))
+encoding_stat_dataset(frame)
 
-# %% codecell
-# print( len(max(frame['encoded'].tolist(), key=len)))
-# maxlen = len(max(frame['encoded'].tolist(), key=len))
-# print("Longest text has ", maxlen, " words")
-# dataset_list = pad_sequences(frame['encoded'].tolist(), maxlen=maxlen, padding='post')
-#
-# for el in dataset_list:
-#     assert(len(el) == maxlen)
-
-# dataset = tf.data.Dataset.from_tensor_slices(dataset_list)
 
 # %% codecell
 # Let's do CBOW
@@ -130,18 +75,7 @@ print("The dataset has ", known, " known tokens and ", unk, " unknown tokens")
 # First we create the feeatures / labels
 # TODO Do not make association between words separated by a point.
 
-
-def features_cbow(text: list):
-    data = []
-    WINDOW_SIZE = 2
-    for word_index, word in enumerate(text):
-        for nb_word in text[max(word_index - WINDOW_SIZE, 0): min(word_index + WINDOW_SIZE, len(text)) + 1]:
-            if nb_word != word:
-                data.append([word, nb_word])
-    return data
-
-
-frame['features_cbow'] = frame['encoded'].progress_apply(features_cbow)
+frame['features_cbow'] = frame['encoded'].progress_apply(cbow.features_cbow)
 
 print(frame['encoded'][0])
 print(frame['features_cbow'][0])
@@ -175,36 +109,17 @@ print("Done converting splitting the dataset")
 # %% codecell
 
 
-class one_hot_batch_generator(tensorflow.keras.utils.Sequence):
-    def __init__(self, features, labels, batch_size, vocab_size):
-        self.features, self.labels = np.array(features), np.array(labels)
-        print(type(self.features))
-        self.batch_size = batch_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        return int(np.ceil(len(self.features) / float(self.batch_size)))
-
-    def __getitem__(self, idx):
-        batch_x = self.features[idx * self.batch_size:(idx + 1) * self.batch_size]
-        batch_y = self.labels[idx * self.batch_size:(idx + 1) * self.batch_size]
-
-        batch_x_one_hot = tf.one_hot(batch_x.astype(np.int32), depth=self.vocab_size)
-        batch_y_one_hot = tf.one_hot(batch_y.astype(np.int32), depth=self.vocab_size)
-
-        return batch_x_one_hot, batch_y_one_hot
-
-
 batch_size = 52
-training_batch_generator = one_hot_batch_generator(data_train, labels_train, batch_size, vocab_size + 2)
+training_batch_generator = generator.one_hot_batch_generator(data_train, labels_train, batch_size, vocab_size + 2)
+test_batch_generator = generator.one_hot_batch_generator(data_test, labels_test, batch_size, vocab_size + 2)
 print("Number of batches", training_batch_generator.__len__())
 
 batch_train, batch_label = training_batch_generator.__getitem__(10)
 
-batch_train_index = [np.where(r==1)[0][0] for r in batch_train]
-batch_label_index = [np.where(r==1)[0][0] for r in batch_label]
-print(decode(batch_train_index, encoder))
-print(decode(batch_label_index, encoder))
+batch_train_index = [np.where(r == 1)[0][0] for r in batch_train]
+batch_label_index = [np.where(r == 1)[0][0] for r in batch_label]
+print(preprocess.decode(batch_train_index, encoder))
+print(preprocess.decode(batch_label_index, encoder))
 
 # %% codecell
 # NLP DEEP LEARNING
@@ -237,6 +152,7 @@ METRICS = [
           # tf.keras.metrics.AUC(name='auc'),
           ]
 
+
 optimizer = tf.keras.optimizers.Adam(lr=learning_rate)
 model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=METRICS)
 
@@ -249,17 +165,27 @@ model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=METR
 # print(data_train.shape)
 # print(labels_train.shape)
 
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    verbose=1,
+    patience=10,
+    mode='max',
+    restore_best_weights=True)
+
+
 history = model.fit(
   x=training_batch_generator,
   # batch_size=batch_size,
   verbose=1,
-  validation_data=training_batch_generator,
-  epochs=2)
+  validation_data=test_batch_generator,
+  epochs=50,
+  callbacks=[early_stopping])
+
 
 # %% codecell
 # SOME TESTS
 batch_size = 1
-training_batch_generator_1 = one_hot_batch_generator(data_train, labels_train, batch_size, vocab_size + 2)
+training_batch_generator_1 = generator.one_hot_batch_generator(data_train, labels_train, batch_size, vocab_size + 2)
 print("Number of batches", training_batch_generator_1.__len__())
 
 batch_train, batch_label = training_batch_generator_1.__getitem__(1)
@@ -271,14 +197,14 @@ batch_y_one_hot = tf.one_hot(np.array(labels_train[0]).astype(np.int32), depth=v
 
 print(batch_x_one_hot.shape)
 
-model.predict(x=np.array( [batch_x_one_hot,] ))
+model.predict(x=np.array([batch_x_one_hot, ]))
 
 # %% codecell
 # Retrieve embedding
 
 e = model.layers[0]
 weights = e.get_weights()[0]
-print(weights.shape) # shape: (vocab_size, embedding_dim)
+print(weights.shape)  # shape: (vocab_size, embedding_dim)
 
 
 out_v = io.open('saved_files/vecs_g.tsv', 'w', encoding='utf-8')
@@ -306,7 +232,7 @@ loss = history_dict['loss']
 
 epochs = range(1, len(acc) + 1)
 
-plt.figure(figsize=(12,9))
+plt.figure(figsize=(12, 9))
 plt.plot(epochs, loss, 'bo', label='Training loss')
 # plt.plot(epochs, val_loss, 'b', label='Validation loss')
 plt.title('Training and validation loss')
@@ -315,12 +241,12 @@ plt.ylabel('Loss')
 plt.legend()
 plt.show()
 
-plt.figure(figsize=(12,9))
+plt.figure(figsize=(12, 9))
 plt.plot(epochs, acc, 'bo', label='Training acc')
 # plt.plot(epochs, val_acc, 'b', label='Validation acc')
 plt.title('Training and validation accuracy')
 plt.xlabel('Epochs')
 plt.ylabel('Accuracy')
 plt.legend(loc='lower right')
-plt.ylim((0,1))
+plt.ylim((0, 1))
 plt.show()
